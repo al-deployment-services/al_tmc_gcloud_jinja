@@ -1,0 +1,95 @@
+# Google Cloud Deployment Manager Template for Alert Logic Threat Manager Appliance
+#
+# Pre-requisite: 
+# 1. copy the al-threat-appliance from Alert Logic storage by running the following command
+#    gcloud compute images create al-threat-appliance --source-uri=https://storage.googleapis.com/threat/al-threat-appliance.tar.gz
+# 2. gcloud project with network and subnet created
+#
+# Required properties
+# - region : region to deploy this appliance, i.e. us-central1
+# - zone : zone for the TM appliance, i.e. us-central1-a
+# - network : network name for the TM appliance
+# - sub_network : subnet name inside the network 
+# - firewall_tag : target tag to be assigned for firewall rules
+# - claim_cidr : source IP CIDR that is allowed to perform web claim on port 80, i.e. 0.0.0.0/0 or specific subnet range
+# - network_cidr : network CIDR for the TM appliance (not subnet / sub network CIDR)
+# - machine_image : image name for Threat Appliance
+# - machine_type : minimum recommendation is n1-standard-4
+#
+# Usage:
+# 1. copy this template to your working directory, i.e. al_tm_deploy.jinja
+# 2. run gcloud deployment-manager and specifiy the parameters, see example below
+#    gcloud deployment-manager deployments create deployment-name --config ./al_tm_deploy.jinja --properties \ 
+#    region:us-central1,zone:us-central1-a,network:al-net,sub_network:al-net-1,firewall_tag:al-tmc, \ 
+#    claim_cidr:0.0.0.0/0,network_cidr:10.5.0.0/16,machine_image:al-threat-appliance,machine_type:n1-standard-4
+# 3. open HTTP://external-ip
+# 4. enter unique registration code to claim the appliance
+
+
+resources:
+- name: {{ env["deployment"] }}-vm
+  type: compute.v1.instance
+  properties:
+    zone: {{ properties["zone"] }}
+    machineType: zones/{{ properties["zone"] }}/machineTypes/{{ properties["machine_type"] }}
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/{{ env["project"] }}/global/images/{{ properties["machine_image"] }}
+    networkInterfaces:
+    - accessConfigs:
+      - name: {{ env["deployment"] }}-external-IP
+        type: ONE_TO_ONE_NAT
+        natIP: $(ref.{{ env["deployment"] }}-external-ip.address)
+      network: https://www.googleapis.com/compute/v1/projects/{{ env["project"] }}/global/networks/{{ properties["network"] }}
+      subnetwork: https://www.googleapis.com/compute/v1/projects/{{ env["project"] }}/regions/{{ properties["region"] }}/subnetworks/{{ properties ["sub_network"] }}
+    tags:
+      items:
+      - {{ properties["firewall_tag"] }}
+- name: {{ env["deployment"] }}-external-ip
+  type: compute.v1.address
+  properties:
+    region: {{ properties["region"] }}
+- name: {{ env["deployment"] }}-inbound-22-4489
+  type: compute.v1.firewall
+  properties:
+    network: https://www.googleapis.com/compute/v1/projects/{{ env["project"] }}/global/networks/{{ properties["network"] }}
+    sourceRanges:
+      - 208.71.209.32/27
+      - 204.110.218.96/27
+      - 204.110.219.96/27
+    targetTags:
+      - {{ properties["firewall_tag"] }}
+    allowed:
+    - IPProtocol: TCP
+      ports:
+        - 22
+        - 4849
+- name: {{ env["deployment"] }}-inbound-80
+  type: compute.v1.firewall
+  properties:
+    network: https://www.googleapis.com/compute/v1/projects/{{ env["project"] }}/global/networks/{{ properties["network"] }}
+    sourceRanges:
+      - {{ properties["claim_cidr"] }}
+    targetTags:
+      - {{ properties["firewall_tag"] }}
+    allowed:
+    - IPProtocol: TCP
+      ports:
+        - 80
+- name: {{ env["deployment"] }}-inbound-agent
+  type: compute.v1.firewall
+  properties:
+    network: https://www.googleapis.com/compute/v1/projects/{{ env["project"] }}/global/networks/{{ properties["network"] }}
+    sourceRanges:
+      - {{ properties["network_cidr"] }}
+    targetTags:
+      - {{ properties["firewall_tag"] }}
+    allowed:
+    - IPProtocol: TCP
+      ports:
+        - 443
+        - 7777
